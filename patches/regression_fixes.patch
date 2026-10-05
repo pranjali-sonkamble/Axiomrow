@@ -1,0 +1,225 @@
+--- a/backend/data_quality.py
++++ b/backend/data_quality.py
+@@ -78,6 +78,16 @@
+         if len(non_missing) < 20:
+             continue
+ 
++        # Cheap probe: a column needs >=80% numeric-like values to be flagged, so a
++        # strided sample that is mostly non-numeric rules it out without converting
++        # millions of strings.
++        probe = non_missing.iloc[::max(1, len(non_missing) // 2000)].head(2000)
++        probe_ratio = float(pd.to_numeric(
++            probe.astype("string").str.replace(",", "", regex=False).str.strip(),
++            errors="coerce").notna().mean())
++        if probe_ratio < 0.5:
++            continue
++
+         converted = pd.to_numeric(
+             non_missing.astype("string").str.replace(",", "", regex=False).str.strip(),
+             errors="coerce",
+@@ -150,9 +160,14 @@
+         if not (pd.api.types.is_object_dtype(s) or pd.api.types.is_string_dtype(s)):
+             continue
+ 
+-        non_missing = s.dropna().astype("string").str.strip()
+-        if len(non_missing) < 20:
++        if int(s.notna().sum()) < 20:
++            continue
++        # Fast exit on DISTINCT values only: if stripping/casefolding collapses
++        # none of them there is nothing to report (identical outcome, no 1M-row string pass).
++        _u = pd.Series(s.dropna().unique(), dtype="string").str.strip()
++        if _u.nunique() <= _u.str.casefold().nunique():
+             continue
++        non_missing = s.dropna().astype("string").str.strip()
+ 
+         # Detect values that become identical after trimming/case normalization,
+         # e.g. "North", " north ", "NORTH".
+--- a/backend/answer_grounding.py
++++ b/backend/answer_grounding.py
+@@ -83,6 +83,13 @@
+     return numbers
+ 
+ 
++_LABEL_STOPWORDS = {
++    "has", "have", "had", "are", "was", "were", "with", "from", "than", "about", "over",
++    "under", "around", "across", "between", "only", "just", "all", "and", "for", "the",
++    "contains", "contain", "spans", "ranges", "approximately", "roughly", "nearly",
++}
++
++
+ def extract_labeled_numbers(text: str) -> dict:
+     """(label, value) pairs using the single word right before each
+     number as the label: "Laptop 40.0" -> {"laptop": 40.0}. Catches
+@@ -94,6 +101,8 @@
+         return pairs
+     for m in re.finditer(r'\b([A-Za-z][A-Za-z]{2,20})\s+(-?\d[\d,]*(?:\.\d+)?)\s*%?', text):
+         label = m.group(1).strip().lower()
++        if label in _LABEL_STOPWORDS:   # "has 5", "from 2": grammar, not a data label
++            continue
+         try:
+             value = float(m.group(2).replace(",", ""))
+         except ValueError:
+--- a/backend/insight_generator.py
++++ b/backend/insight_generator.py
+@@ -121,7 +121,7 @@
+         if current_title and current_parts:
+             body = " ".join(current_parts).strip()
+             if len(body) > 15:
+-                insights.append({"title": clean(current_title), "body": clean(body)})
++                insights.append({"title": clean(current_title).strip("[] "), "body": clean(body)})
+ 
+     for line in lines:
+         if not line:
+--- a/backend/query_engine.py
++++ b/backend/query_engine.py
+@@ -55,6 +55,10 @@
+         tokens.add(normal[:-1])
+     else:
+         tokens.add(normal + "s")
++    # "sales rep" / "sales reps" must resolve to the column sales_rep.
++    spaced = normal.replace("_", " ")
++    tokens.add(spaced)
++    tokens.add(spaced[:-1] if spaced.endswith("s") else spaced + "s")
+     for canonical, aliases in COLUMN_ALIASES.items():
+         if normal in {_normalise(a) for a in aliases}:
+             tokens.update(_normalise(a) for a in aliases)
+@@ -297,8 +301,22 @@
+     return ", ".join(cleaned)
+ 
+ 
++def _strip_categorical_phrases(question: str, df: pd.DataFrame) -> str:
++    """Remove multi-word categorical column names ('sales rep', 'customer_segment')
++    from a question so their words ('sales') are not mistaken for a metric alias."""
++    q = str(question).lower()
++    for c in df.columns:
++        if pd.api.types.is_numeric_dtype(df[c]):
++            continue
++        for tok in sorted(_column_tokens(c), key=len, reverse=True):
++            if " " in tok or "_" in tok:
++                q = re.sub(r"(?<!\w)" + re.escape(tok) + r"(?!\w)", " ", q)
++    return q
++
++
+ def _metric_column(question: str, df: pd.DataFrame):
+     """Resolve a numeric metric, including natural plural forms such as 'profit margins'."""
++    question = _strip_categorical_phrases(question, df)
+     col = _find_column(question, df.columns)
+     if col is not None and pd.api.types.is_numeric_dtype(df[col]):
+         return col
+@@ -333,11 +351,15 @@
+     q = question.lower()
+ 
+     # Explicit grouping prepositions.
+-    m = re.search(r"\b(?:by|per)\s+(?:the\s+)?([A-Za-z_][A-Za-z0-9_]*)", q)
++    m = re.search(r"\b(?:by|per)\s+(?:the\s+)?([A-Za-z_][A-Za-z0-9_]*)(?:\s+([A-Za-z_][A-Za-z0-9_]*))?", q)
+     if m:
+-        col = _find_column(m.group(1), df.columns)
+-        if col is not None:
+-            return col
++        candidates = [m.group(1)]
++        if m.group(2):
++            candidates.insert(0, f"{m.group(1)} {m.group(2)}")
++        for cand in candidates:
++            col = _find_column(cand, df.columns)
++            if col is not None:
++                return col
+ 
+     # "for each date/product/region", "across each date".
+     m = re.search(r"\b(?:for|across)\s+(?:each|every)\s+([A-Za-z_][A-Za-z0-9_]*)", q)
+@@ -436,7 +458,9 @@
+         selected = pairs[:2]
+         vals = []
+         date_col = _find_date_column(df)
+-        dates = pd.to_datetime(df[date_col], errors="coerce") if date_col else None
++        if date_col is None:
++            return None
++        dates = pd.to_datetime(df[date_col], errors="coerce")
+         for month_num, year, label in selected:
+             mask = (dates.dt.year == year) & (dates.dt.month == month_num)
+             value = float(df.loc[mask, metric_col].sum())
+@@ -446,7 +470,7 @@
+         pct = (diff / a * 100.0) if a != 0 else None
+         pct_text = f"{pct:.2f}%" if pct is not None else "N/A"
+         return _text(
+-            f"Comparison of {a_label} {a_year} revenue: {a:,.2f} "
++            f"Comparison of {a_label} {a_year} {metric_col}: {a:,.2f} "
+             f"{b_label} {b_year}: {b:,.2f} "
+             f"Absolute difference: {diff:,.2f} Percentage difference: {pct_text}"
+         )
+@@ -466,7 +490,7 @@
+         pct = (diff / a * 100.0) if a != 0 else None
+         pct_text = f"{pct:.2f}%" if pct is not None else "N/A"
+         return _text(
+-            f"Comparison of revenue {a_year}: {a:,.2f} {b_year}: {b:,.2f} "
++            f"Comparison of {metric_col} {a_year}: {a:,.2f} {b_year}: {b:,.2f} "
+             f"Absolute difference: {diff:,.2f} Percentage difference: {pct_text}"
+         )
+     return None
+@@ -592,6 +616,14 @@
+         return "date", _find_date_column(df)
+     if _word_in_text("region", q) or _word_in_text("regions", q):
+         return "region", _find_column("region", df.columns)
++    # Any other categorical column named in the question (sales_rep,
++    # customer_segment, ...). Only when exactly one is named, never a guess.
++    date_col = _find_date_column(df)
++    hits = [c for c in df.columns
++            if c != date_col and not pd.api.types.is_numeric_dtype(df[c])
++            and _find_column(q, [c]) is not None]
++    if len(hits) == 1:
++        return "category", hits[0]
+     return None, None
+ 
+ 
+@@ -728,7 +760,7 @@
+         }}
+ 
+     group_col = _group_column(q, df)
+-    if group_col is not None and metric_col is not None:
++    if group_col is not None and metric_col is not None and group_col != metric_col:
+         agg = _aggregation(q) or "sum"
+         return {"answer_type":"chart","chart":{"type":chart_type,"x":str(group_col),"y":str(metric_col),"aggregation":agg,
+                 "title":f"{agg.title()} {metric_col} by {group_col}"}}
+@@ -1186,7 +1218,7 @@
+     group_col = _group_column(q, df)
+     agg = _aggregation(q)
+     metric_col = _metric_column(q, df)
+-    if group_col is not None and metric_col is not None and agg is not None:
++    if group_col is not None and metric_col is not None and agg is not None and group_col != metric_col:
+         # If this is a date group, group by normalized dates for consistent
+         # date-only semantics.
+         if group_col == _find_date_column(df):
+@@ -1202,7 +1234,16 @@
+     # =========================================================
+     # 10. FILTERED AGGREGATION — metric + aggregation + categorical/date filter
+     # =========================================================
+-    if agg is not None and metric_col is not None:
++    # A question that asks "which / who / highest / how many / top ..." but was
++    # not understood above must NOT be answered with an overall total - that
++    # would be a confident, wrong answer. Fall through (and let the LLM path
++    # compute it from the data) instead.
++    _asks_structure = re.search(
++        r"\b(which|who|whom|highest|lowest|most|least|top|bottom|best|worst|rank|ranking|"
++        r"how\s+many|number\s+of|count|trend|growth|change|increase|decrease|decline|over\s+time|"
++        r"why|drop|dropped|fall|fell|rise|rose|grew|grow|predict|predicted|forecast|projected|projection|estimate|estimated|expected|"
++        r"next\s+(?:\d+\s+)?(?:day|days|week|weeks|month|months|quarter|quarters|year|years))\b", ql)
++    if agg is not None and metric_col is not None and not _asks_structure:
+         working = df
+ 
+         cat = _find_categorical_value(q, df)
+@@ -1258,6 +1299,16 @@
+                     if col is not None:
+                         return _text(f"{df[col].dropna().nunique():,}")
+ 
++        # Any other single categorical column ("how many sales reps are there?").
++        # Not for "... per/by/in each X" questions, which ask for counts per group.
++        if not re.search(r"\b(per|each|by|in|for|with|where|from|than|having)\b", ql):
++            _dc = _find_date_column(df)
++            hits = [c for c in df.columns
++                    if c != _dc and not pd.api.types.is_numeric_dtype(df[c])
++                    and _find_column(ql, [c]) is not None]
++            if len(hits) == 1:
++                return _text(f"{df[hits[0]].dropna().nunique():,}")
++
+     # "What are the unique dates?" without the word count.
+     if re.search(r"\b(unique|distinct)\b", ql):
+         col = _find_column(ql, df.columns)

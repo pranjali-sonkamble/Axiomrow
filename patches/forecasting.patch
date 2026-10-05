@@ -1,0 +1,32 @@
+--- a/backend/forecasting.py
++++ b/backend/forecasting.py
+@@ -51,10 +51,10 @@
+             # refuse it with a clear "already covered" message.
+             return bool(forecast_words)
+         if target_year == max_date.year:
+-            # A current year is forecastable only when the raw data does not
+-            # already cover the whole calendar year, or when explicit forecast
+-            # language asks for an estimate that can be evaluated/refused.
+-            return max_date.normalize() < pd.Timestamp(target_year, 12, 31) or bool(forecast_words)
++            # The current (possibly part-observed) year is a forecast request only
++            # with explicit forecast language ("estimate/predict/will..."). A plain
++            # "revenue in 2025" is a historical question about the data we DO have.
++            return bool(forecast_words)
+         return True
+ 
+     return any(re.search(p, q) for p in _FUTURE_PATTERNS)
+@@ -410,7 +410,13 @@
+     # period is the correct anchor.
+     forecast_anchor = work["date"].max() if partial_period_excluded else series.index.max()
+     future_idx = _future_index(forecast_anchor, freq, horizon)
+-    pred = _fit(series.to_numpy(dtype=float), method, horizon, season)
++    # When the incomplete latest period was left out of the model history, the
++    # model's first predicted step is that incomplete period, but the labels in
++    # future_idx start AFTER it. Predict the gap too and drop it so every value
++    # lines up with its label (otherwise "July" gets June's seasonal value).
++    gap = max(0, len(pd.date_range(series.index.max(), future_idx[0], freq=freq)) - 2)
++    pred = _fit(series.to_numpy(dtype=float), method, horizon + gap, season)
++    pred = pred[gap:] if pred is not None else None
+     if pred is None or len(pred) != horizon or not np.isfinite(pred).all():
+         return _text_result("I couldn't produce a stable estimate from the available history.")
+ 

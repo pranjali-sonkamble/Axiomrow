@@ -1,0 +1,310 @@
+--- a/backend/report_generator.py
++++ b/backend/report_generator.py
+@@ -54,6 +54,22 @@
+     return cache["column_groups"]
+ 
+ 
++def _cached_whitespace_cols(df):
++    cache = _cache_for(df)
++    if "whitespace_cols" not in cache:
++        found = []
++        for col in df.select_dtypes(include=["object", "string"]).columns:
++            sr = df[col].dropna()
++            if len(sr) == 0:
++                continue
++            # Test the distinct values only: same answer, far fewer string ops.
++            u = pd.Series(sr.astype(str).unique())
++            if (u != u.str.strip()).any():
++                found.append(str(col))
++        cache["whitespace_cols"] = found
++    return cache["whitespace_cols"]
++
++
+ def _cached_missing_total(df):
+     cache = _cache_for(df)
+     if "missing_total" not in cache:
+@@ -208,6 +224,17 @@
+         if col in numeric or col in date_cols:
+             continue
+         name_hint = str(col).lower()
++        # Cheap pre-check on a strided sample: skip columns that clearly are not dates
++        # (avoids parsing 1M+ strings per text column).
++        stride = max(1, len(df) // 500)
++        probe = df[col].iloc[::stride].dropna().head(500)
++        if len(probe):
++            try:
++                pr = pd.to_datetime(probe, errors="coerce", format="mixed")
++            except (TypeError, ValueError):
++                pr = pd.to_datetime(probe, errors="coerce")
++            if float(pr.notna().mean()) < 0.5:
++                continue
+         try:
+             parsed = pd.to_datetime(df[col], errors="coerce", format="mixed")
+         except (TypeError, ValueError):
+@@ -232,7 +259,7 @@
+             if isinstance(item, dict) and "name" in item:
+                 supplied[item["name"]] = item
+ 
+-    numeric, categorical, date_cols = _column_groups(df)
++    numeric, categorical, date_cols = _cached_column_groups(df)
+     result = []
+     for col in df.columns:
+         s = df[col]
+@@ -273,7 +300,7 @@
+ # ---------------------------------------------------------------------------
+ 
+ def _outlier_profile(df):
+-    numeric, _, _ = _column_groups(df)
++    numeric, _, _ = _cached_column_groups(df)
+     rows = []
+     for col in numeric:
+         s = pd.to_numeric(df[col], errors="coerce").dropna()
+@@ -313,7 +340,7 @@
+ def _negative_measure_findings(df):
+     """Return non-blocking negative-value warnings consistent with data_quality.py."""
+     findings = []
+-    numeric, _, _ = _column_groups(df)
++    numeric, _, _ = _cached_column_groups(df)
+     for col in numeric:
+         if not _is_numeric_like_name(col):
+             continue
+@@ -347,11 +374,7 @@
+         findings.append(f"{missing_total:,} missing value(s) detected across {len(affected)} column(s): {', '.join(affected[:8])}{'...' if len(affected) > 8 else ''}.")
+ 
+     object_cols = list(df.select_dtypes(include=["object", "string"]).columns)
+-    whitespace_cols = []
+-    for col in object_cols:
+-        s = df[col].dropna().astype(str)
+-        if len(s) and (s != s.str.strip()).any():
+-            whitespace_cols.append(str(col))
++    whitespace_cols = _cached_whitespace_cols(df)
+     findings.append(
+         "No leading/trailing whitespace issue was detected in text fields." if not whitespace_cols else
+         "Leading/trailing whitespace detected in: " + ", ".join(whitespace_cols[:8]) + "."
+@@ -385,7 +408,7 @@
+ 
+ 
+ def _quality_actions(df):
+-    numeric, categorical, date_cols = _column_groups(df)
++    numeric, categorical, date_cols = _cached_column_groups(df)
+     actions = []
+     dup = _cached_duplicate_total(df)
+     miss = _cached_missing_total(df)
+@@ -432,12 +455,7 @@
+ 
+     object_cols = list(df.select_dtypes(include=["object", "string"]).columns)
+     whitespace_pct = (
+-        sum(
+-            len(df[col].dropna()) > 0
+-            and (df[col].dropna().astype(str) != df[col].dropna().astype(str).str.strip()).any()
+-            for col in object_cols
+-        )
+-        / max(len(object_cols), 1) * 100
++        len(_cached_whitespace_cols(df)) / max(len(object_cols), 1) * 100
+         if object_cols else 0.0
+     )
+ 
+@@ -445,7 +463,7 @@
+         int(r["count"] or 0) for r in _outlier_profile(df)
+         if r["count"] is not None
+     )
+-    numeric_cells = sum(df[c].notna().sum() for c in _column_groups(df)[0])
++    numeric_cells = sum(df[c].notna().sum() for c in _cached_column_groups(df)[0])
+     outlier_pct = outlier_total / max(int(numeric_cells), 1) * 100
+ 
+     # Bounded, transparent penalties.
+@@ -545,7 +563,27 @@
+     return rows
+ 
+ 
++def _is_identifier_column(df, col):
++    """order_id-style columns are labels, not measures: never correlate,
++    sum, or chart them as if they were quantities."""
++    cache = _cache_for(df).setdefault("ident", {})
++    if col in cache:
++        return cache[col]
++    name = re.sub(r"[^a-z0-9]+", "_", str(col).lower()).strip("_")
++    ident = name in ("id", "index", "uuid", "row_number") or name.endswith("_id") or name.startswith("id_")
++    if not ident:
++        sr = df[col]
++        ident = bool(pd.api.types.is_integer_dtype(sr) and len(sr) > 20 and sr.nunique() == sr.notna().sum())
++    cache[col] = ident
++    return ident
++
++
++def _measure_columns(df, numeric):
++    return [c for c in numeric if not _is_identifier_column(df, c)]
++
++
+ def _best_correlation(df, numeric):
++    numeric = _measure_columns(df, numeric)
+     if len(numeric) < 2:
+         return None
+     corr = df[numeric].apply(pd.to_numeric, errors="coerce").corr()
+@@ -572,17 +610,20 @@
+ 
+ 
+ def _primary_measure(df, numeric):
+-    if not numeric:
++    measures = _measure_columns(df, numeric) or list(numeric)
++    if not measures:
+         return None
+-    hints = ("revenue", "sales", "amount", "profit", "income", "value", "cost", "price", "score")
+-    for col in numeric:
+-        if any(h in str(col).lower() for h in hints):
+-            return col
+-    return numeric[0]
++    # Priority order of hints (revenue beats price), not column order.
++    hints = ("revenue", "sales", "amount", "income", "turnover", "profit", "cost", "value", "price", "score")
++    for h in hints:
++        for col in measures:
++            if h in str(col).lower():
++                return col
++    return measures[0]
+ 
+ 
+ def _secondary_measure(df, numeric, primary):
+-    return next((c for c in numeric if c != primary), None)
++    return next((c for c in _measure_columns(df, numeric) if c != primary), None)
+ 
+ 
+ def _group_metrics(df, category, measure):
+@@ -629,7 +670,7 @@
+ def _row_context(df, idx, numeric_primary=None):
+     """Return human-readable context for a max/min observation when available."""
+     parts = []
+-    numeric, categorical, date_cols = _column_groups(df)
++    numeric, categorical, date_cols = _cached_column_groups(df)
+     if date_cols:
+         d = pd.to_datetime(df.loc[idx, date_cols[0]], errors="coerce")
+         if pd.notna(d):
+@@ -644,7 +685,7 @@
+ 
+ 
+ def _deterministic_insights(df):
+-    numeric, categorical, date_cols = _column_groups(df)
++    numeric, categorical, date_cols = _cached_column_groups(df)
+     insights = []
+     primary = _primary_measure(df, numeric)
+     secondary = _secondary_measure(df, numeric, primary)
+@@ -723,7 +764,7 @@
+ 
+ 
+ def _recommendations(df):
+-    numeric, categorical, date_cols = _column_groups(df)
++    numeric, categorical, date_cols = _cached_column_groups(df)
+     recs = []
+     primary = _primary_measure(df, numeric)
+ 
+@@ -762,7 +803,7 @@
+ 
+ 
+ def _executive_summary(df, profile=None, insights=None, quick_stats=None):
+-    numeric, categorical, date_cols = _column_groups(df)
++    numeric, categorical, date_cols = _cached_column_groups(df)
+     missing = _cached_missing_total(df)
+     duplicates = _cached_duplicate_total(df)
+     primary = _primary_measure(df, numeric)
+@@ -784,8 +825,25 @@
+ # CHART GENERATION
+ # ---------------------------------------------------------------------------
+ 
++def _partial_final_period(df, date_col, granularity, series):
++    """Return the last data date (as text) if the final aggregated period is only partly covered, else ''."""
++    if granularity not in ("month", "week") or len(series) < 2:
++        return ""
++    dates = pd.to_datetime(df[date_col], errors="coerce").dropna()
++    last = pd.Timestamp(series.index[-1])
++    if granularity == "month":
++        start, end = last.to_period("M").start_time, last.to_period("M").end_time.normalize()
++    else:
++        start, end = last, last + pd.Timedelta(days=6)
++    dmax = dates.max().normalize()
++    if dates[dates >= start].dt.normalize().nunique() < 3:
++        return ""
++    coverage = ((dmax - start).days + 1) / float((end - start).days + 1)
++    return dmax.strftime("%d %b %Y") if coverage < 0.9 else ""
++
++
+ def _chart_interpretation(title, df, context=None):
+-    numeric, categorical, date_cols = _column_groups(df)
++    numeric, categorical, date_cols = _cached_column_groups(df)
+     primary = _primary_measure(df, numeric)
+     if title.startswith("Distribution of"):
+         col = title.replace("Distribution of ", "", 1)
+@@ -812,13 +870,21 @@
+     if title.startswith("Time Trend") and date_cols:
+         series, granularity = _time_aggregation(df, date_cols[0], primary)
+         if len(series):
++            note = ""
++            partial = _partial_final_period(df, date_cols[0], granularity, series)
++            if partial and len(series) > 2:
++                note = (f" The final period ({series.index[-1].strftime('%b %Y') if granularity == 'month' else series.index[-1].strftime('%d %b %Y')}) "
++                        f"only has data up to {partial}, so its total is incomplete and is not comparable with full periods; it is excluded from the highest/lowest comparison.")
++                series = series.iloc[:-1]
+             hi, lo = series.idxmax(), series.idxmin()
+             fmt = "%d %b %Y" if granularity == "observed date" else "%d %b %Y" if granularity == "week" else "%b %Y"
+             label = f"{hi.strftime(fmt)}"; low_label = f"{lo.strftime(fmt)}"
+             metric = primary if primary else "record count"
+-            return f"Using {granularity} aggregation, the highest total {metric} is {_fmt_number(series.max())} at {label}; the lowest is {_fmt_number(series.min())} at {low_label}."
+-    if title.startswith("Relationship") and len(numeric) >= 2:
+-        x, y = numeric[:2]
++            return f"Using {granularity} aggregation, the highest total {metric} is {_fmt_number(series.max())} at {label}; the lowest is {_fmt_number(series.min())} at {low_label}.{note}"
++    if title.startswith("Relationship") and " vs " in title:
++        x, y = title.replace("Relationship - ", "", 1).split(" vs ", 1)
++        if x not in df.columns or y not in df.columns:
++            return "The scatter plot shows the row-level relationship between the two variables."
+         pair = df[[x, y]].apply(pd.to_numeric, errors="coerce").dropna()
+         if len(pair) >= 2:
+             r = pair[x].corr(pair[y])
+@@ -852,14 +918,17 @@
+         if data:
+             charts.append((section, title, data, _chart_interpretation(title, df, context)))
+ 
+-    # 1. Numeric distributions.
+-    for col in numeric[:4]:
++    measures = _measure_columns(df, numeric)
++    if primary in measures:
++        measures = [primary] + [c for c in measures if c != primary]
++
++    # 1. Numeric distributions (full data: counts, mean and median must match the tables).
++    for col in measures[:4]:
+         s = pd.to_numeric(df[col], errors="coerce").dropna()
+         if len(s) < 2:
+             continue
+-        plot_s = s.sample(50000, random_state=42) if len(s) > 50000 else s
+         add("5.1 Univariate Analysis", f"Distribution of {col}", None,
+-            lambda plot_s=plot_s, col=col: cr.render_hist(f"Distribution of {col}", plot_s.values, str(col)))
++            lambda s=s, col=col: cr.render_hist(f"Distribution of {col}", s.to_numpy(dtype=float), str(col)))
+ 
+     # 2. Categorical frequency.
+     for col in categorical[:3]:
+@@ -896,8 +965,8 @@
+                                        xlabel=str(dcol), ylabel=metric_label))
+ 
+     # 5. Relationship + correlation matrix.
+-    if len(numeric) >= 2:
+-        xcol, ycol = numeric[:2]
++    if len(measures) >= 2:
++        xcol, ycol = measures[:2]
+         pair = df[[xcol, ycol]].apply(pd.to_numeric, errors="coerce").dropna()
+         if len(pair) >= 2:
+             plot_pair = pair.sample(10000, random_state=42) if len(pair) > 10000 else pair
+@@ -905,7 +974,7 @@
+             add("5.4 Relationship Analysis", title, None,
+                 lambda: cr.render_scatter(title, plot_pair[xcol].values, plot_pair[ycol].values,
+                                           xlabel=str(xcol), ylabel=str(ycol)))
+-        corr = df[numeric[:10]].apply(pd.to_numeric, errors="coerce").corr()
++        corr = df[measures[:10]].apply(pd.to_numeric, errors="coerce").corr()
+         if not corr.empty:
+             add("5.4 Relationship Analysis", "Correlation Matrix", None,
+                 lambda: cr.render_heatmap("Correlation Matrix", corr.columns, corr.values))
+@@ -1001,7 +1070,7 @@
+             return {"type":"bar", "x":"region", "y":"revenue", "group_by":"category",
+                     "aggregation":"sum", "title":"Sum revenue by region and category"}
+ 
+-    numeric, categorical, date_cols = _column_groups(df)
++    numeric, categorical, date_cols = _cached_column_groups(df)
+     chart_words = ("chart", "plot", "histogram", "bar", "line", "scatter", "pie", "visual", "distribution")
+     if not any(w in q for w in chart_words):
+         return None

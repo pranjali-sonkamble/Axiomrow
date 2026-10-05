@@ -1,0 +1,38 @@
+--- a/backend/query_engine.py
++++ b/backend/query_engine.py
+@@ -906,6 +906,17 @@
+         return None
+ 
+     # =========================================================
++    # 0.1 DATA-QUALITY CHECKS — before generic aggregation
++    # =========================================================
++    duplicate = _duplicate_check(q, df)
++    if duplicate is not None:
++        return duplicate
++
++    negative = _negative_value_check(q, df)
++    if negative is not None:
++        return negative
++
++    # =========================================================
+     # 0.1 NON-DETERMINISTIC INTENT GUARD
+     # =========================================================
+     # Forecasting and causal/root-cause reasoning belong to the dedicated
+@@ -956,17 +967,6 @@
+         return chart
+ 
+     # =========================================================
+-    # 0.1 DATA-QUALITY CHECKS — before generic aggregation
+-    # =========================================================
+-    duplicate = _duplicate_check(q, df)
+-    if duplicate is not None:
+-        return duplicate
+-
+-    negative = _negative_value_check(q, df)
+-    if negative is not None:
+-        return negative
+-
+-    # =========================================================
+     # 0.2 EXPLICIT COMPARISONS — before generic aggregation
+     # =========================================================
+     comparison = _comparison_request(q, df)

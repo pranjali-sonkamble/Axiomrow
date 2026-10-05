@@ -1,0 +1,14 @@
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+__pycache__/
+.pytest_cache/
+venv/
+.venv/
+*.log
+*.pkl
+deploy_test/
+tests/large_test_data.csv
+*.pyc
+__pycache__/
