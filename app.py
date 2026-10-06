@@ -28,8 +28,6 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger("axiomrow")
-CHART_REPORT_FIX_VERSION = "V4-FORCED-LOCAL-REPORT-CHART-2026-10-02"
-logger.info("[CHART-REPORT-FIX] app %s loaded", CHART_REPORT_FIX_VERSION)
 
 # ── SECRETS BRIDGE — must run before any backend import ────────────
 # backend/llm_agent.py reads its API key with plain os.getenv(), which
@@ -69,11 +67,7 @@ try:
 except Exception:
     pass
 
-# FORCE the report generator to come from THIS application's backend directory.
-# This prevents Streamlit/Python from retaining an older backend.report_generator
-# module from a previous run or a different working directory.
 import sys
-import importlib
 _APP_DIR = os.path.dirname(os.path.abspath(__file__))
 if _APP_DIR not in sys.path:
     sys.path.insert(0, _APP_DIR)
@@ -81,13 +75,9 @@ if _APP_DIR not in sys.path:
 from backend.insight_generator import generate_insights, get_quick_stats
 from backend.chart_generator import generate_chart
 from backend.data_loader import load_csv, get_data_profile, get_llm_context
-import backend.report_generator as _report_generator
-_report_generator = importlib.reload(_report_generator)
-logger.info("[CHART-REPORT-FIX] USING REPORT GENERATOR: %s", getattr(_report_generator, "__file__", "<unknown>"))
-logger.info("[CHART-REPORT-FIX] REPORT GENERATOR VERSION: %s", getattr(_report_generator, "CHART_REPORT_GENERATOR_VERSION", "<missing>"))
 from backend.report_generator import (
     generate_markdown_report, generate_pdf_report, prepare_report_analysis,
-    reconstruct_chat_chart,
+    reconstruct_chat_chart, render_chart_config_png, render_forecast_png,
 )
 try:
     from backend.data_quality import assess_data_quality
@@ -547,7 +537,10 @@ def process_answer_result(raw_result, df: pd.DataFrame, t: dict, render_inline: 
             if render_inline:
                 st.plotly_chart(fig, use_container_width=True)
             try:
-                img_bytes = fig.to_image(format="png", width=800, height=500)
+                # Pillow renderer: no kaleido/Chrome dependency.
+                img_bytes = render_chart_config_png(df, chart_config)
+                if not img_bytes:
+                    raise ValueError("chart image unavailable")
                 if render_inline:
                     st.download_button(
                         label="Download chart as PNG",
@@ -558,9 +551,21 @@ def process_answer_result(raw_result, df: pd.DataFrame, t: dict, render_inline: 
                 new_msg["chart_bytes"] = img_bytes
                 new_msg["chart_title"] = chart_config.get("title", "Chart")
             except Exception:
-                pass
+                logger.info("PNG export unavailable for this chart", exc_info=True)
 
         new_msg["answer"] = result.get("content") or "Here’s the chart."
+
+    elif answer_type == "forecast":
+        content = result.get("content", "")
+        new_msg["answer"] = content
+        png = render_forecast_png(result)
+        if png:
+            new_msg["chart_bytes"] = png
+            new_msg["chart_title"] = f"{(result.get('forecast') or {}).get('metric', 'Metric')} forecast"
+        if render_inline:
+            st.write(content.replace("\n", "  \n"))
+            if png:
+                st.image(png, use_container_width=True)
 
     else:
         if render_inline:
@@ -2185,7 +2190,7 @@ elif st.session_state.active_tab == "Chat":
             unsafe_allow_html=True
         )
 
-        for msg in messages:
+        for msg_idx, msg in enumerate(messages):
             with st.chat_message("user", avatar=AVATAR_USER):
                 st.write(msg["question"])
             with st.chat_message("assistant", avatar=AVATAR_ASSISTANT):
@@ -2197,6 +2202,10 @@ elif st.session_state.active_tab == "Chat":
                     # read time as defense-in-depth.
                     render_code_boxes(t, msg)
                     render_framing(msg, columns=list(df.columns))
+                elif msg.get("type") == "forecast":
+                    st.write(str(msg["answer"]).replace("\n", "  \n"))
+                    if msg.get("chart_bytes"):
+                        st.image(msg["chart_bytes"], use_container_width=True)
                 else:
                     st.write(msg["answer"])
                 if msg.get("type") == "chart":
@@ -2213,7 +2222,7 @@ elif st.session_state.active_tab == "Chat":
                             st.plotly_chart(
                                 fig,
                                 use_container_width=True,
-                                key=f"history_chart_{hash(msg.get('question', ''))}_{hash(str(chart_config))}"
+                                key=f"history_chart_{st.session_state.current_chat_id}_{msg_idx}"
                             )
                     elif msg.get("chart_bytes"):
                         # Backward compatibility for older chat messages.

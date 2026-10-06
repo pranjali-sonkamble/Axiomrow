@@ -215,6 +215,7 @@ def test_llm_client_is_built_once_and_reused(monkeypatch):
     monkeypatch.setitem(sys.modules, "groq", fake_groq_module)
     agent._LLM_CLIENT_CACHE.clear()
     monkeypatch.setenv("LLM_PROVIDER", "groq")
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
 
     c1, provider1, model1 = agent.get_llm_client()
     c2, provider2, model2 = agent.get_llm_client()
@@ -226,3 +227,17 @@ def test_warm_up_never_raises_even_if_everything_fails(monkeypatch):
     # Simulate every optional dependency being unavailable/misconfigured.
     monkeypatch.setattr(agent, "get_llm_client", lambda: (_ for _ in ()).throw(RuntimeError("no key")))
     agent.warm_up_heavy_imports()   # must swallow the exception, not propagate
+
+
+# ---- forecasting is reachable from the chat entry point ----
+def test_forecast_question_is_answered_without_the_llm(monkeypatch):
+    import numpy as np
+    d = pd.DataFrame({"date": pd.date_range("2023-01-01", periods=36, freq="MS"),
+                      "revenue": 1000 + np.arange(36) * 25.0})
+    def fail(*a, **k):
+        raise AssertionError("LLM must not be called for a forecast question")
+    monkeypatch.setattr(agent, "call_llm", fail)
+    r = agent.answer_question("predict next 3 months revenue", "summary", None,
+                              df_columns=list(d.columns), df=d, session_id=None)
+    assert r["answer_type"] == "forecast" and r["verified"] is True
+    assert len(r["forecast"]["values"]) == 3

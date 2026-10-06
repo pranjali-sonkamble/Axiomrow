@@ -201,7 +201,7 @@ def test_fallback_preserves_existing_validation(monkeypatch, df):
 # ============================================================
 
 def test_query_engine_exception_falls_through_to_llm(monkeypatch, df):
-    def boom(question, df):
+    def boom(*a, **k):
         raise RuntimeError("simulated unexpected query_engine failure")
     monkeypatch.setattr(agent, "query_dataframe", boom)
 
@@ -224,7 +224,7 @@ def test_query_engine_not_called_when_df_is_none(monkeypatch):
     # answer_question() can be called without a live DataFrame (e.g. the
     # dataset failed to load); the fast path must not attempt to run
     # query_dataframe(None, ...) and must go straight to the LLM path.
-    def fail_if_called(question, df):
+    def fail_if_called(*a, **k):
         raise AssertionError("query_dataframe should not be called with df=None")
     monkeypatch.setattr(agent, "query_dataframe", fail_if_called)
     monkeypatch.setattr(agent, "call_llm",

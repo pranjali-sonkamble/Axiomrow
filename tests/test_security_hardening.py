@@ -44,6 +44,10 @@ def test_f_strings_and_percent_formatting_still_work(df):
     out, err = execute_code("t = df['a'].sum()\nprint(f'Total: {t:,}')\nprint('%d rows' % len(df))", df)
     assert err is None and "Total: 6" in out
 
+@pytest.mark.skipif(
+    "fork" not in __import__("multiprocessing").get_all_start_methods(),
+    reason="needs fork start method (Linux/macOS only)",
+)
 
 def test_worker_environment_is_wiped(df, monkeypatch):
     # Even if a path to os.environ existed, the secrets are gone in the child.

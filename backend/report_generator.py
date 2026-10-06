@@ -32,10 +32,6 @@ import pandas as pd
 # object is kept alive by Streamlit, so its id is stable for the current run.
 _REPORT_CACHE = {}
 logger = logging.getLogger(__name__)
-CHART_REPORT_GENERATOR_VERSION = "V4-EXACT-REPORT-CHART-2026-10-02"
-logger.info("[CHART-REPORT-FIX] report_generator %s loaded from %s", CHART_REPORT_GENERATOR_VERSION, __file__)
-CHART_REPORT_FIX_VERSION = "V2-DIRECT-CHAT-CHART-2026-10-02"
-logger.info("[CHART-REPORT-FIX] %s loaded", CHART_REPORT_FIX_VERSION)
 
 
 def _cache_for(df):
@@ -972,7 +968,7 @@ def _make_charts(df):
         s = pd.to_numeric(df[col], errors="coerce").dropna()
         if len(s) < 2:
             continue
-        add("5.1 Univariate Analysis", f"Distribution of {col}", None,
+        add("6.1 Univariate Analysis", f"Distribution of {col}", None,
             lambda s=s, col=col: cr.render_hist(f"Distribution of {col}", s.to_numpy(dtype=float), str(col)))
 
     # 2. Categorical frequency.
@@ -980,7 +976,7 @@ def _make_charts(df):
         vc = df[col].dropna().astype(str).value_counts().head(10)
         if len(vc) < 2:
             continue
-        add("5.2 Categorical Analysis", f"Category Frequency - {col}", col,
+        add("6.2 Categorical Analysis", f"Category Frequency - {col}", col,
             lambda vc=vc, col=col: cr.render_bar_h(f"Category Frequency - {col}", vc.index, vc.values,
                                                    xlabel="Record count", ylabel=str(col)))
 
@@ -991,7 +987,7 @@ def _make_charts(df):
             if len(g) < 2:
                 continue
             show = g.head(10)
-            add("5.2 Categorical Analysis", f"Total {primary} by {col}", col,
+            add("6.2 Categorical Analysis", f"Total {primary} by {col}", col,
                 lambda show=show, col=col: cr.render_bar_h(f"Total {primary} by {col}", show.index,
                                                            show["total"].values,
                                                            xlabel=f"Total {primary}", ylabel=str(col)))
@@ -1005,7 +1001,7 @@ def _make_charts(df):
             title = f"Time Trend - {metric_label} ({granularity})"
             fmt = "%b %Y" if granularity == "month" else "%d %b"
             labels = [pd.Timestamp(i).strftime(fmt) for i in series.index]
-            add("5.3 Time-Based Analysis", title, None,
+            add("6.3 Time-Based Analysis", title, None,
                 lambda: cr.render_line(title, labels, {metric_label: series.values},
                                        xlabel=str(dcol), ylabel=metric_label))
 
@@ -1016,12 +1012,12 @@ def _make_charts(df):
         if len(pair) >= 2:
             plot_pair = pair.sample(10000, random_state=42) if len(pair) > 10000 else pair
             title = f"Relationship - {xcol} vs {ycol}"
-            add("5.4 Relationship Analysis", title, None,
+            add("6.4 Relationship Analysis", title, None,
                 lambda: cr.render_scatter(title, plot_pair[xcol].values, plot_pair[ycol].values,
                                           xlabel=str(xcol), ylabel=str(ycol)))
         corr = df[measures[:10]].apply(pd.to_numeric, errors="coerce").corr()
         if not corr.empty:
-            add("5.4 Relationship Analysis", "Correlation Matrix", None,
+            add("6.4 Relationship Analysis", "Correlation Matrix", None,
                 lambda: cr.render_heatmap("Correlation Matrix", corr.columns, corr.values))
 
     return charts
@@ -1267,6 +1263,35 @@ def _render_chat_chart_from_config(df, msg):
         return None, None
 
 
+def render_chart_config_png(df, chart_config):
+    """Public: PNG bytes for a chart_config using the Pillow renderer (no
+    kaleido / browser needed). Returns None if it cannot be drawn."""
+    png, _title = _render_chat_chart_from_config(df, {"chart_config": chart_config})
+    return png
+
+
+def render_forecast_png(forecast_result):
+    """PNG (history + forecast + band) for a forecast_dataframe() result."""
+    from backend import chart_renderer as cr
+    fc = (forecast_result or {}).get("forecast") or {}
+    values = fc.get("values") or []
+    if not values:
+        return None
+    hist = fc.get("historical") or []
+    metric = fc.get("metric", "value")
+    def lab(p):
+        return pd.Timestamp(p).strftime("%b %Y")
+    try:
+        return cr.render_forecast(
+            f"{metric} - forecast", [lab(h["period"]) for h in hist], [h["value"] for h in hist],
+            [lab(v["period"]) for v in values], [v["value"] for v in values],
+            [x["value"] for x in fc.get("lower", [])] or None,
+            [x["value"] for x in fc.get("upper", [])] or None, ylabel=str(metric))
+    except Exception:
+        logger.exception("forecast chart render failed")
+        return None
+
+
 def _looks_like_chart_question(question):
     q = str(question or "").strip().lower()
     if not q:
@@ -1434,7 +1459,8 @@ def generate_markdown_report(df, profile: dict, insights: list, quick_stats: dic
     lines = [
         "# DATA ANALYSIS REPORT", "", f"**Dataset:** {name}", f"**Generated:** {generated}", "",
         "## Executive Summary", "", summary, "",
-        "## 1. Dataset Overview", "", "| Metric | Value |", "|---|---:|",
+        "## 1. Analysis Methodology", "", *[f"- {m}" for m in a["methodology"]], "",
+        "## 2. Dataset Overview", "", "| Metric | Value |", "|---|---:|",
         f"| Records | {len(df):,} |", f"| Features | {len(df.columns):,} |",
         f"| Numeric columns | {len(numeric):,} |", f"| Categorical columns | {len(categorical):,} |",
         f"| Date/time columns | {len(date_cols):,} |", f"| Missing values | {_cached_missing_total(df):,} |",

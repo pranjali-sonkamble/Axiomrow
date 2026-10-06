@@ -533,3 +533,54 @@ def render_box(title, groups, ylabel=""):
         cv.text(cx, B + 10, cv.fit(nm, band - 6, 12), size=12, fill=MUTED, align="m")
     _axis_labels(cv, "", ylabel, L, T, R, B)
     return cv.png()
+
+
+# --------------------------------------------------------------- forecast
+def render_forecast(title, hist_labels, hist_values, fc_labels, fc_values,
+                    lower=None, upper=None, ylabel=""):
+    """History line, forecast line (dashed look via lighter colour) and an
+    optional shaded uncertainty band. Labels are plain strings."""
+    hist_labels = [str(x) for x in hist_labels]
+    fc_labels = [str(x) for x in fc_labels]
+    hv = [float(v) for v in hist_values]
+    fv = [float(v) for v in fc_values]
+    if not fv:
+        raise ValueError("no forecast data")
+    lo_b = [float(v) for v in lower] if lower is not None else fv
+    up_b = [float(v) for v in upper] if upper is not None else fv
+    labels = hist_labels + fc_labels
+    n, nh = len(labels), len(hv)
+    allv = hv + lo_b + up_b + fv
+    cv = _Canvas()
+    _title(cv, title)
+    L, R, T, B = 100, W - 50, 100, H - 95
+    lo, hi, ticks = _nice_ticks(min(0.0, min(allv)), max(allv))
+    ym = _vaxis(cv, L, T, R, B, lo, hi, ticks)
+    pad = 18
+    xm = (lambda i: L + pad + (R - L - 2 * pad) * i / (n - 1)) if n > 1 else (lambda i: (L + R) / 2)
+
+    # uncertainty band
+    top = [(xm(nh + i), ym(v)) for i, v in enumerate(up_b)]
+    bot = [(xm(nh + i), ym(v)) for i, v in enumerate(lo_b)][::-1]
+    poly = top + bot
+    if len(poly) >= 3:
+        cv.d.polygon([(x * S, y * S) for x, y in poly], fill=COLORS[1] + (45,))
+
+    step = max(1, math.ceil(n / 10))
+    for i in range(0, n, step):
+        cv.line(xm(i), B, xm(i), B + 5, AXIS, 1)
+        cv.text(xm(i), B + 10, cv.fit(labels[i], 90, 12), size=12, fill=MUTED, align="m")
+
+    hist_pts = [(xm(i), ym(v)) for i, v in enumerate(hv)]
+    cv.polyline(hist_pts, COLORS[0], 3)
+    # connect last actual point to the first forecast point
+    fc_pts = ([hist_pts[-1]] if hist_pts else []) + [(xm(nh + i), ym(v)) for i, v in enumerate(fv)]
+    cv.polyline(fc_pts, COLORS[1], 3)
+    if n <= 40:
+        for x, y in hist_pts:
+            cv.dot(x, y, 4.5, COLORS[0], outline=(255, 255, 255))
+        for x, y in fc_pts[1 if hist_pts else 0:]:
+            cv.dot(x, y, 4.5, COLORS[1], outline=(255, 255, 255))
+    _legend(cv, ["Actual", "Forecast"])
+    _axis_labels(cv, "", ylabel, L, T, R, B)
+    return cv.png()

@@ -12,6 +12,7 @@ from prompts.system_prompts import DATA_ANALYST_SYSTEM_PROMPT
 from backend.rate_limiter import check_and_register
 from backend.pii_masking import mask_messages
 from backend.query_engine import query_dataframe
+from backend.forecasting import forecast_dataframe
 from backend.answer_grounding import (
     text_makes_data_claims, build_known_values, UNVERIFIED_ANSWER_MESSAGE,
     find_grounding_problems, find_unsupported_prediction_claims,
@@ -597,6 +598,19 @@ def answer_question(user_question: str, data_context: str, chat_history: list = 
                         "verified": True,
                         "source": "deterministic_query_engine",
                     }
+
+    # ── Deterministic forecasting (backend/forecasting.py) ──────────
+    # Future-looking questions ("predict next month revenue") go to the
+    # backtested forecaster, never the LLM (which is told not to forecast).
+    # forecast_dataframe() returns None for anything that is not a forecast.
+    if df is not None:
+        try:
+            fc = forecast_dataframe(user_question, df)
+        except Exception:
+            logger.exception("forecast_dataframe raised unexpectedly; falling through")
+            fc = None
+        if isinstance(fc, dict):
+            return fc
 
     # Chart requests that are not understood deterministically still get the
     # LLM path, with deterministic inference used later as a safety net.
