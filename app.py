@@ -3015,17 +3015,6 @@ elif st.session_state.active_tab == "Reports":
                             key="dl_pdf_final",
                         )
 
-            if st.button(
-                "↻  Regenerate with current settings",
-                key="regenerate_report",
-                type="secondary",
-                use_container_width=True,
-            ):
-                st.session_state.report_md = None
-                st.session_state.report_pdf = None
-                st.session_state.report_analysis = None
-                st.session_state.report_config = None
-                st.rerun()
 
 
 # ── SETTINGS ─────────────────────────────────────────────────────
