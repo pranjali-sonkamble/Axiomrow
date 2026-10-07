@@ -1246,7 +1246,7 @@ def _code_exec_worker(code: str, df, result_queue) -> None:
         _lock_down_worker()
         sys.stdout = io.StringIO()
         try:
-            exec(code, exec_globals)
+            exec(code, exec_globals)  # nosec B102 — AST-validated, restricted sandbox execution
             output = sys.stdout.getvalue()
 
             if output.strip():
