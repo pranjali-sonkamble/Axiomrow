@@ -1,23 +1,22 @@
-# Axiomrow — NO / NOT ANALYSIS-READY Branch
+# Axiomrow — Implementation Notes
 
-## Changed files
-- `app.py` — minimum integration required to place the quality gate before the existing analysis entry point.
-- `backend/data_quality.py` — deterministic, read-only profiling and readiness logic.
-- `tests/test_data_quality.py` — data-quality/readiness tests.
-- `tests/test_quality_gate_integration.py` — checks that downstream analysis is guarded and same-name re-upload identity is supported.
+## Request pipeline
+1. **Upload** → size/row/column limits enforced while parsing → data-quality gate (`backend/data_quality.py`).
+   Blocking issues stop analysis; warnings are shown but do not block.
+2. **Question** → in order: deterministic engine (`query_engine.py`) → backtested forecaster (`forecasting.py`)
+   → LLM that must return Python + SQL (`llm_agent.py`).
+3. **Execution** → AST-validated Python in a killable, environment-scrubbed subprocess; read-only DuckDB with
+   external access disabled and configuration locked.
+4. **Verification** → Python and SQL results are cross-checked; any sentence the model writes is validated by
+   `answer_grounding.py` (numbers, names, causal/prediction claims). Unverifiable answers are refused, not guessed.
+5. **Report** → one consistent PDF/Markdown report built from dataframe-verified statistics (`report_generator.py`).
 
-## Gate behavior
-1. Upload is loaded once.
-2. Existing Axiomrow profile is attempted.
-3. Deterministic quality profiling runs.
-4. Critical/High findings block analysis.
-5. Warning/Info findings are shown but do not automatically block.
-6. On NOT READY, downstream LLM context, insights and quick stats are not generated, and the existing analysis tabs are not rendered.
-7. On READY, the existing downstream calls are executed unchanged.
-8. A new upload is detected using Streamlit's `file_id` when available, so a cleaned file can be re-uploaded even with the same filename.
-9. The uploaded dataframe is never modified by the quality layer.
+## Testing
+- `python -m pytest tests -q` — unit, integration, security and evaluation tests.
+- `python -m evaluation.run_eval` — 80-check accuracy / grounding / sandbox evaluation (no network).
+- One test (`test_worker_environment_is_wiped`) needs the `fork` start method and is skipped on Windows.
 
-## Verification
-- `python -m py_compile app.py` — passed.
-- New quality/integration tests: **15 passed**.
-- The full pre-existing project test suite could not be executed in this environment because the complete project source tree was not available as a mounted project; only the current `app.py` and selected saved project artifacts were available for implementation.
+## Known limitations
+- The sandbox is layered defence, not OS isolation; run in a container for untrusted public use.
+- PII masking is regex-based. Set `AXIOMROW_SEND_SAMPLE_ROWS=0` for sensitive data.
+- Forecasts are simple baselines (naive, seasonal naive, linear trend) selected by backtest.

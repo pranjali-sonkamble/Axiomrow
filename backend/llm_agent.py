@@ -63,7 +63,7 @@ def get_llm_client():
         # are now Enterprise-tier only. openai/gpt-oss-20b is the
         # current fastest/cheapest developer-tier model, with a much
         # larger context window (131K vs the old 8,192 tokens).
-        result = (client, "groq", "openai/gpt-oss-20b")
+        result = (client, "groq", os.getenv("GROQ_MODEL", "openai/gpt-oss-20b"))
 
     elif provider == "openai":
         api_key = os.getenv("OPENAI_API_KEY")
@@ -71,7 +71,7 @@ def get_llm_client():
             raise ValueError("OPENAI_API_KEY is missing")
         from openai import OpenAI
         client = OpenAI(api_key=api_key)
-        result = (client, "openai", "gpt-3.5-turbo")
+        result = (client, "openai", os.getenv("OPENAI_MODEL", "gpt-3.5-turbo"))
 
     else:
         raise ValueError(f"Unknown LLM provider: {provider}. Use 'groq' or 'openai'")

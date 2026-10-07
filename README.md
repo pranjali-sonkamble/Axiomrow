@@ -129,6 +129,7 @@ streamlit run app.py
 |---|---|---|
 | `GROQ_API_KEY` / `OPENAI_API_KEY` | none | Provider credentials |
 | `LLM_PROVIDER` | `groq` | `groq` or `openai` |
+| `GROQ_MODEL` / `OPENAI_MODEL` | `openai/gpt-oss-20b` / `gpt-3.5-turbo` | Override the model if a provider deprecates it |
 | `AXIOMROW_SEND_SAMPLE_ROWS` | `1` | Set `0` to stop sending raw sample rows to the LLM |
 | `AXIOMROW_GLOBAL_LLM_CALLS_PER_HOUR` | `600` | Deployment-wide LLM call cap |
 | `AXIOMROW_ENABLE_XLSX` | off | Set `1` to allow Excel loading in the loader (the UI accepts CSV only) |
@@ -148,6 +149,21 @@ streamlit run app.py
 4. Run one upload-to-report pass on the live URL.
 
 ---
+
+## Evaluation
+
+`python -m evaluation.run_eval` runs 80 checks with **no LLM or network**: deterministic answers are compared
+with independently computed pandas results; forecast questions must reach the backtested forecaster; fabricated or
+over-claiming sentences must be rejected while faithful ones pass; sandbox attacks (file reads, env access, SQL file
+functions) must fail while legitimate analysis still runs. The same checks run in CI via `tests/test_evaluation.py`.
+
+| Category | Result |
+|---|---|
+| Aggregations, filters, rankings, counts, grouping, quality | 43 / 43 |
+| "Why / trend" questions never answered with a false total | 4 / 4 |
+| Forecast routing + honest refusal on thin history | 4 / 4 |
+| Grounding (10 fabrications rejected, 4 faithful accepted) | 14 / 14 |
+| Sandbox (13 attacks blocked, 2 legit queries allowed) | 15 / 15 |
 
 ## Tests
 
@@ -190,4 +206,4 @@ Time scales roughly linearly with rows.
 
 ## License
 
-_Add a license (for example MIT) before publishing._
+MIT — see [LICENSE](LICENSE).

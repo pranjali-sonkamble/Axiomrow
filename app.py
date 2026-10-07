@@ -1770,6 +1770,11 @@ if st.session_state.active_tab == "Home":
                     <div class="cover-support">
                         Supports CSV files only · Up to 150MB per file · Ready for analysis
                     </div>
+                    <div class="cover-support" style="margin-top:4px;">
+                        Privacy: column names, summary statistics and a few sample rows (with emails,
+                        phone numbers and ID patterns masked) are sent to the AI provider to answer
+                        questions. Your full file is never sent.
+                    </div>
                 """, unsafe_allow_html=True)
             elif _bad_file:
                 pass  # handle_csv_upload() puts the explanation in status_slot
