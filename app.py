@@ -906,28 +906,38 @@ def _safe_display_name(name) -> str:
 
 # ── CSV UPLOAD HANDLING (shared by the Home page and Settings) ────
 def handle_csv_upload(uploaded_file, status_slot=None):
-    """Loads a newly-uploaded CSV, resets everything that's derived
-    from the previous dataset, and kicks off profiling/insight
-    generation. Safe to call every rerun — it no-ops once the same
-    file (matched by name AND size) is already loaded, so a cleaned
-    file re-uploaded under the same filename is correctly treated
-    as new.
+    """Loads a newly-uploaded CSV, resets everything derived from the
+    previous dataset, and starts profiling and insight generation.
 
-    Failures are reported through `status_slot` (an st.empty() placed
-    directly under the uploader) when given, so the message appears where
-    the user is looking and REPLACES the static "Profiling..." card. A
-    failed file's message is remembered per (name, size), so Streamlit
-    reruns neither re-parse a bad file nor lose the message."""
+    Uses upload-processing state so the UI can distinguish a newly
+    selected file from a file that is already being processed.
+    """
+
     if uploaded_file is None:
         return
 
     upload_identity = (uploaded_file.name, uploaded_file.size)
+
+    # ── PROCESSING STATE ─────────────────────────────────────────
+    current_phase = st.session_state.get("upload_processing_phase")
+    processing_identity = st.session_state.get(
+        "processing_upload_identity"
+    )
+
+    if st.session_state.get("loaded_upload_identity") != upload_identity:
+
+        if processing_identity != upload_identity:
+            st.session_state["processing_upload_identity"] = upload_identity
+            st.session_state["upload_processing_phase"] = "processing"
+            current_phase = "processing"
 
     def _show(msg):
         (status_slot if status_slot is not None else st).error(msg)
 
     def _fail(msg):
         st.session_state["failed_upload"] = (upload_identity, msg)
+        st.session_state["upload_processing_phase"] = None
+        st.session_state["processing_upload_identity"] = None
         _show(msg)
 
     failed = st.session_state.get("failed_upload")
@@ -939,30 +949,51 @@ def handle_csv_upload(uploaded_file, status_slot=None):
         return
 
     ext = os.path.splitext(str(uploaded_file.name))[1].lower()
+
     if ext != ".csv":
-        _fail(f"Unsupported file type ({ext[:12] or 'no extension'}). "
-              "Axiomrow analyses .csv files — please export your data as CSV and upload it again.")
+        _fail(
+            f"Unsupported file type ({ext[:12] or 'no extension'}). "
+            "Axiomrow analyses .csv files — please export your data "
+            "as CSV and upload it again."
+        )
         return
+
     if uploaded_file.size == 0:
-        _fail("That file is empty (0 bytes). Please upload a CSV that contains a header row and data.")
+        _fail(
+            "That file is empty (0 bytes). Please upload a CSV that "
+            "contains a header row and data."
+        )
         return
 
     try:
+        # ── Step 1: Load CSV ──────────────────────────────────────
         df_loaded = load_csv(uploaded_file)
-        if len(df_loaded) > MAX_UPLOAD_ROWS or df_loaded.shape[1] > MAX_UPLOAD_COLS:
+
+        if (
+            len(df_loaded) > MAX_UPLOAD_ROWS
+            or df_loaded.shape[1] > MAX_UPLOAD_COLS
+        ):
             raise ValueError(
                 f"This file is too large to analyse safely "
-                f"({len(df_loaded):,} rows x {df_loaded.shape[1]:,} columns). "
-                f"Limit: {MAX_UPLOAD_ROWS:,} rows and {MAX_UPLOAD_COLS} columns."
+                f"({len(df_loaded):,} rows x "
+                f"{df_loaded.shape[1]:,} columns). "
+                f"Limit: {MAX_UPLOAD_ROWS:,} rows and "
+                f"{MAX_UPLOAD_COLS} columns."
             )
+
         df_loaded = _normalize_date_columns(df_loaded)
+
+        # ── Store loaded dataset ─────────────────────────────────
         st.session_state.df = df_loaded
         st.session_state.profile = get_data_profile(df_loaded)
         st.session_state._date_dtype_fix_version = _DATE_DTYPE_FIX_VERSION
-        # Remember this upload so a widget that still holds the file
-        # (e.g. the Settings uploader) doesn't reload it and wipe chats.
+
         st.session_state.loaded_upload_identity = upload_identity
-        st.session_state.loaded_filename = _safe_display_name(uploaded_file.name)
+        st.session_state.loaded_filename = _safe_display_name(
+            uploaded_file.name
+        )
+
+        # ── Reset derived state ──────────────────────────────────
         st.session_state.insights = None
         st.session_state.quick_stats = None
         st.session_state.report_md = None
@@ -973,49 +1004,60 @@ def handle_csv_upload(uploaded_file, status_slot=None):
         st.session_state.dq_result = None
         st.session_state.chats = {}
         st.session_state.current_chat_id = None
+
         create_new_chat()
 
-        
-
-            # ── Step 2: run the quality gate ─────────────────────────────────
+        # ── Step 2: Run the quality gate ──────────────────────────
         dq = assess_data_quality(df_loaded)
         st.session_state.dq_result = dq
 
         if dq["analysis_ready"]:
-                # ── YES path: prepare the analysis pipeline, but always land
-                #    on Data Quality first after a fresh upload.
-                st.session_state.llm_context = get_llm_context(
-                    df_loaded, profile=st.session_state.profile
-                )
-                st.session_state.insights = generate_insights(
-                    df_loaded, session_id=st.session_state.session_id
-                )
-                st.session_state.quick_stats = get_quick_stats(df_loaded)
-                st.toast(
-                    f"Loaded — {len(df_loaded):,} rows × {len(df_loaded.columns)} columns",
-                    icon=None
-                )
-        else:
-                # ── NO path: block analysis and land on the quality report. ──
-                st.toast(
-                    f"{len(dq['blocking_issues'])} blocking issue(s) found — please clean your data.",
-                    icon=None
-                )
+            st.session_state.llm_context = get_llm_context(
+                df_loaded,
+                profile=st.session_state.profile
+            )
 
-        # ── Every fresh CSV upload opens Data Quality first. ────────────────
-        #    This applies to both analysis-ready and blocked datasets.
+            st.session_state.insights = generate_insights(
+                df_loaded,
+                session_id=st.session_state.session_id
+            )
+
+            st.session_state.quick_stats = get_quick_stats(
+                df_loaded
+            )
+
+            st.toast(
+                f"Loaded — {len(df_loaded):,} rows × "
+                f"{len(df_loaded.columns)} columns",
+                icon=None
+            )
+
+        else:
+            st.toast(
+                f"{len(dq['blocking_issues'])} blocking issue(s) found "
+                f"— please clean your data.",
+                icon=None
+            )
+
+        # Every fresh CSV upload opens Data Quality first.
         st.session_state.active_tab = "Data Quality"
         st.session_state["failed_upload"] = None
+
+        # Processing is complete.
+        st.session_state["upload_processing_phase"] = None
+        st.session_state["processing_upload_identity"] = None
 
         st.rerun()
 
     except ValueError as e:
         _fail(str(e))
-    except Exception:
-        # Never show parser/library internals (paths, stack frames) to the user.
-        logger.exception("CSV upload failed")
-        _fail("That file could not be read. Please check it is a valid CSV and try again.")
 
+    except Exception:
+        logger.exception("CSV upload failed")
+        _fail(
+            "That file could not be read. Please check it is a valid CSV "
+            "and try again."
+        )
 
 # ── SESSION STATE SETUP ───────────────────────────────────────────
 if "session_id" not in st.session_state:
@@ -1058,6 +1100,10 @@ if "csv_bytes" not in st.session_state:
     st.session_state.csv_bytes = None
 if "dq_result" not in st.session_state:
     st.session_state.dq_result = None
+if "upload_processing_phase" not in st.session_state:
+    st.session_state["upload_processing_phase"] = None
+if "processing_upload_identity" not in st.session_state:
+    st.session_state["processing_upload_identity"] = None
 
 # ── APPLY THEME ───────────────────────────────────────────────────
 t = T
@@ -1185,15 +1231,15 @@ with st.sidebar:
                 st.session_state.active_tab = "Data Quality"
             elif label == "Chat with Data":
                 st.session_state.active_tab = "Chat"
-            elif label == "Analysis":
-                st.session_state.active_tab = st.session_state.last_analysis_tab
-            elif label == "Reports":
-                st.session_state.active_tab = "Reports"
-            elif label == "Settings":
+            if "upload_processing_phase" not in st.session_state:
+                st.session_state["upload_processing_phase"] = None
+
+            if "processing_upload_identity" not in st.session_state:
+                st.session_state["processing_upload_identity"] = None
                 st.session_state.active_tab = "Settings"
             st.rerun()
 
-    # ── Recent chats (ChatGPT-style) ────────────────────────────
+    # ── Recent chats ────────────────────────────────────────────
     if has_data:
         st.divider()
         st.markdown("<div class='sidebar-section-label'>Recent</div>", unsafe_allow_html=True)
