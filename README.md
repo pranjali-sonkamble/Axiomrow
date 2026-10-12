@@ -4,7 +4,7 @@
 
 Axiomrow is an AI-assisted data analysis workspace built with Streamlit. Upload a CSV, check its quality, explore it, ask questions in plain English, and export a report. The design goal is that **a number shown to the user is always one that was computed from their data**, never one the language model made up.
 
-> **Live demo:** _add your Streamlit Cloud URL here_
+> **Live demo:** [Launch Axiomrow](https://axiomrow.streamlit.app/)
 > **Screenshots:** _add 3–4 images to `assets/` and link them here (Home, Data Quality, Chat, Report)_
 
 ---
