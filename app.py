@@ -397,7 +397,8 @@ def process_answer_result(raw_result, df: pd.DataFrame, t: dict, render_inline: 
                           question: str = None) -> dict:
     """
     The single place that turns answer_question()'s return value into
-    a fully-populated chat message: normalizes the result, executes    any Python/SQL code, builds any requested chart, and (optionally)
+    a fully-populated chat message: normalizes the result, executes
+    any Python/SQL code, builds any requested chart, and (optionally)
     renders it inline.
 
       render_inline=True  -> also draws the response into the current
@@ -796,7 +797,8 @@ def build_suggested_questions(profile: dict, dq_result: dict = None) -> list:
         category = top_issue.get("category", "")
         templates = {
             "validity": f"How many {top_col} values are negative, and is that expected?",
-            "outlier": f"What are the extreme outlier values in {top_col}?",            "duplicate": "Show me the duplicate rows in this dataset",
+            "outlier": f"What are the extreme outlier values in {top_col}?",
+            "duplicate": "Show me the duplicate rows in this dataset",
             "missing": f"Which rows are missing {top_col}?",
             "data_type": f"Which values in {top_col} can't be read as numbers?",
             "date": f"Which values in {top_col} don't look like valid dates?",
@@ -1594,7 +1596,8 @@ if st.session_state.active_tab == "Home":
             height:30px;
             border-radius:50%;
             border:4px solid #DCE4FF;
-            border-top-color:{t["primary"]};            border-right-color:{t["accent2"]};
+            border-top-color:{t["primary"]};
+            border-right-color:{t["accent2"]};
             box-sizing:border-box;
             animation:cover-spin .85s linear infinite;
             box-shadow:0 0 12px rgba(79,70,229,.14);
@@ -1993,7 +1996,8 @@ elif st.session_state.active_tab == "Data Quality":
             </div>
             <div>
                 <div style='font-size:1rem;font-weight:700;color:{t["text"]};'>
-                    Data Quality Assessment                </div>
+                    Data Quality Assessment
+                </div>
                 <div style='font-size:0.78rem;color:{t["text_secondary"]};margin-top:2px;'>
                     {html.escape(str(dq["reason"]))}
                 </div>
@@ -2392,7 +2396,8 @@ div[data-testid="stHorizontalBlock"]:has(.st-key-__analysisnav0):has(.st-key-__a
 }
 
 div[data-testid="stHorizontalBlock"]:has(.st-key-__analysisnav0):has(.st-key-__analysisnav1):has(.st-key-__analysisnav2) .stButton > button:hover {
-    background:#F8FAFC !important;    color:#2563EB !important;
+    background:#F8FAFC !important;
+    color:#2563EB !important;
     border:0 !important;
     border-radius:0 !important;
     box-shadow:none !important;
