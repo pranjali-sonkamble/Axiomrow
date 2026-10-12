@@ -5,7 +5,9 @@
 Axiomrow is an AI-assisted data analysis workspace built with Streamlit. Upload a CSV, check its quality, explore it, ask questions in plain English, and export a report. The design goal is that **a number shown to the user is always one that was computed from their data**, never one the language model made up.
 
 > **Live demo:** [Launch Axiomrow](https://axiomrow.streamlit.app/)
-> **Screenshots:** _add 3–4 images to `assets/` and link them here (Home, Data Quality, Chat, Report)_
+> **Screenshots:** Browse the [application screenshots](screenshots/) below to explore the main workflows.
+>
+> **Demo video:** [Watch the Axiomrow demo](axiomrow-demo.mp4)_
 
 ---
 
@@ -207,3 +209,56 @@ Time scales roughly linearly with rows.
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+
+---
+
+## Screenshots
+
+### 1. Landing Page
+![Axiomrow landing page](screenshots/01-landing-page.png)
+
+### 2. Data Quality Gate
+
+Axiomrow audits the dataset before analysis, distinguishing blocking issues from warnings.
+
+![Data quality assessment](screenshots/03-data-quality-assessment.png)
+
+![Blocking data quality issues](screenshots/02-data-quality-blocking-issues.png)
+
+### 3. Data Exploration
+
+| Data Preview | Data Profile |
+|---|---|
+| ![Dataset preview](screenshots/05-data-preview.png) | ![Dataset profile](screenshots/06-data-profile.png) |
+
+### 4. Chat with Data
+
+Ask natural-language questions about the dataset and generate visualizations from the data.
+
+![Chat with Data scatter chart](screenshots/07-chat-with-data-chart.png)
+
+![Chat assistant conversation](screenshots/08-chat-assistant-conversation.png)
+
+### 5. Reports
+
+Explore suggested questions and generate a complete analysis report.
+
+![Reports dashboard and suggested questions](screenshots/09-reports-and-suggested-questions.png)
+
+![Report generation and downloads](screenshots/10-report-generation-and-download.png)
+
+### 6. Exported Analysis Report
+
+![Generated Axiomrow data analysis report](screenshots/11-generated-pdf-report.png)
+
+### Additional Data Quality View
+![Data quality overview](screenshots/04-data-quality-overview.png)
+
+## Demo Video
+
+[▶ Watch the Axiomrow project demo](axiomrow-demo.mp4)
+
+The demo walks through Axiomrow's interface, dataset quality checks, data exploration, chat-based analysis, visualizations, and report export.
+
+> **Note:** The demo link assumes the video is committed to the repository root as `axiomrow-demo.mp4`. If you host it on YouTube instead, replace this link with the public or unlisted video URL.
