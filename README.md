@@ -137,6 +137,17 @@ streamlit run app.py
 
 ---
 
+## Run with Docker
+
+A non-root Docker image is included for testing the app in an isolated container. From the repository root:
+
+```bash
+docker build -t axiomrow .
+docker run --rm -p 8501:8501 --env-file .env axiomrow
+```
+
+Create a local `.env` file from `.env.example` first and add your provider API key. Do not commit the `.env` file. Open `http://localhost:8501` after the container starts. This Dockerfile is a deployment starting point; validate resource limits, outbound-network policy, secrets handling, and monitoring before exposing a public instance.
+
 ## Deploying to Streamlit Community Cloud
 
 1. Push the repository to GitHub. Confirm `.env` and `.streamlit/secrets.toml` are not tracked.
