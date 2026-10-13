@@ -71,7 +71,7 @@ def get_llm_client():
             raise ValueError("OPENAI_API_KEY is missing")
         from openai import OpenAI
         client = OpenAI(api_key=api_key)
-        result = (client, "openai", os.getenv("OPENAI_MODEL", "gpt-3.5-turbo"))
+        result = (client, "openai", os.getenv("OPENAI_MODEL", "gpt-4o-mini"))
 
     else:
         raise ValueError(f"Unknown LLM provider: {provider}. Use 'groq' or 'openai'")
