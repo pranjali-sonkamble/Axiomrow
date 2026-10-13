@@ -130,7 +130,7 @@ streamlit run app.py
 |---|---|---|
 | `GROQ_API_KEY` / `OPENAI_API_KEY` | none | Provider credentials |
 | `LLM_PROVIDER` | `groq` | `groq` or `openai` |
-| `GROQ_MODEL` / `OPENAI_MODEL` | `openai/gpt-oss-20b` / `gpt-3.5-turbo` | Override the model if a provider deprecates it |
+| `GROQ_MODEL` / `OPENAI_MODEL` | `openai/gpt-oss-20b` / `gpt-4o-mini` | Override the model if a provider deprecates it |
 | `AXIOMROW_SEND_SAMPLE_ROWS` | `1` | Set `0` to stop sending raw sample rows to the LLM |
 | `AXIOMROW_GLOBAL_LLM_CALLS_PER_HOUR` | `600` | Deployment-wide LLM call cap |
 | `AXIOMROW_ENABLE_XLSX` | off | Set `1` to allow Excel loading in the loader (the UI accepts CSV only) |
