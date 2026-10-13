@@ -25,6 +25,19 @@ NUMERIC_NAME_HINTS = (
     "discount", "cost", "profit", "balance",
 )
 
+# Fields whose numeric-looking values are identifiers, not measures. They must
+# not trigger numeric-type blockers merely because most IDs contain digits.
+IDENTIFIER_NAME_HINTS = (
+    "id", "code", "sku", "stockcode", "invoice", "customer", "account",
+    "product", "postal", "postcode", "zip", "phone", "telephone",
+    "reference", "refno", "order number", "orderno",
+)
+
+
+def _is_identifier_like_name(name: str) -> bool:
+    s = re.sub(r"[^a-z0-9]+", "", str(name).lower())
+    return any(h.replace(" ", "") in s for h in IDENTIFIER_NAME_HINTS)
+
 def _issue(
     issue: str,
     severity: str,
@@ -70,6 +83,10 @@ def _is_numeric_like_name(name: str) -> bool:
 
 def _detect_numeric_as_text(df: pd.DataFrame, issues: List[Dict[str, Any]]) -> None:
     for col in df.columns:
+        # Do not treat identifiers such as StockCode as numeric measures.
+        # Only columns whose names imply a numeric quantity are candidates.
+        if _is_identifier_like_name(col) or not _is_numeric_like_name(col):
+            continue
         s = df[col]
         if not (pd.api.types.is_object_dtype(s) or pd.api.types.is_string_dtype(s)):
             continue
@@ -160,40 +177,51 @@ def _detect_category_inconsistency(df: pd.DataFrame, issues: List[Dict[str, Any]
         if not (pd.api.types.is_object_dtype(s) or pd.api.types.is_string_dtype(s)):
             continue
 
-        if int(s.notna().sum()) < 20:
-            continue
-        # Fast exit on DISTINCT values only: if stripping/casefolding collapses
-        # none of them there is nothing to report (identical outcome, no 1M-row string pass).
-        _u = pd.Series(s.dropna().unique(), dtype="string").str.strip()
-        if _u.nunique() <= _u.str.casefold().nunique():
-            continue
-        non_missing = s.dropna().astype("string").str.strip()
-
-        # Detect values that become identical after trimming/case normalization,
-        # e.g. "North", " north ", "NORTH".
-        normalized = non_missing.str.casefold()
-        duplicate_normalized = int(normalized.duplicated(keep=False).sum())
-        if duplicate_normalized == 0:
+        non_missing = s.dropna().astype("string")
+        if len(non_missing) < 20:
             continue
 
+        # Compare distinct labels first, but preserve the original spelling so
+        # whitespace-only variants are not silently erased before detection.
+        normalized = non_missing.str.strip().str.casefold()
         raw_unique = int(non_missing.nunique(dropna=True))
         normalized_unique = int(normalized.nunique(dropna=True))
         if raw_unique <= normalized_unique:
             continue
 
-        affected_pct = _safe_pct(duplicate_normalized, len(non_missing))
+        # A frequent normalized label is not itself an inconsistency. Count
+        # only rows using a non-dominant spelling within a normalized group,
+        # and separately report how many distinct labels collapse together.
+        variants = pd.DataFrame({"normalized": normalized, "raw": non_missing})
+        variant_counts = (
+            variants.groupby(["normalized", "raw"], sort=False, dropna=False)
+            .size()
+            .rename("count")
+            .reset_index()
+        )
+        dominant_idx = variant_counts.groupby("normalized", sort=False)["count"].idxmax()
+        dominant = variant_counts.loc[dominant_idx, ["normalized", "raw"]]
+        canonical_by_normalized = dict(zip(dominant["normalized"], dominant["raw"]))
+        canonical_for_row = normalized.map(canonical_by_normalized)
+        affected_rows = int(non_missing.ne(canonical_for_row).sum())
+        if affected_rows == 0:
+            continue
+
+        affected_pct = _safe_pct(affected_rows, len(non_missing))
+        collapsed_labels = raw_unique - normalized_unique
         issues.append(_issue(
             "Inconsistent categorical values",
             "WARNING",
-            f"{raw_unique:,} raw categories collapse to {normalized_unique:,} "
-            f"after trimming/case normalization; {duplicate_normalized:,} values "
-            f"({affected_pct:.1f}%) are potentially inconsistent variants.",
+            f"{raw_unique:,} raw labels collapse to {normalized_unique:,} "
+            f"after trimming/case normalization ({collapsed_labels:,} extra label "
+            f"variant(s)); {affected_rows:,} rows ({affected_pct:.1f}%) use a "
+            "non-dominant spelling within their normalized category.",
             "Grouping and aggregation may split one logical category into multiple "
             "labels and distort counts or totals.",
             "Standardize whitespace, capitalization and known category labels; "
             "review the variants before analysis.",
             columns=[str(col)],
-            affected_rows=duplicate_normalized,
+            affected_rows=affected_rows,
             affected_pct=affected_pct,
             category="category",
         ))
