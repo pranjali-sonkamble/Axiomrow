@@ -95,3 +95,27 @@ def test_empty_dataset_blocks():
     df = pd.DataFrame(columns=["a", "b"])
     result = assess_data_quality(df)
     assert result["analysis_ready"] is False
+
+def test_identifier_codes_are_not_flagged_as_numeric_type_errors():
+    # IDs often contain digits but are labels, not numeric measures.
+    values = [str(i) for i in range(95)] + ["POST", "D", "M", "C", "DOT"]
+    result = assess_data_quality(pd.DataFrame({"StockCode": values}))
+    assert not any(
+        i["issue"] == "Numeric values stored as text / mixed numeric type"
+        and "StockCode" in i.get("columns", [])
+        for i in result["issues"]
+    )
+
+
+def test_category_inconsistency_reports_variant_rows_not_all_repeated_categories():
+    # The dominant spelling is used as the reference within each normalized group.
+    values = ["North"] * 40 + ["north"] * 10 + ["South"] * 40 + ["South "] * 10
+    result = assess_data_quality(pd.DataFrame({"region": values}))
+    issue = next(
+        i for i in result["issues"]
+        if i["issue"] == "Inconsistent categorical values"
+    )
+    assert issue["affected_rows"] == 20
+    assert issue["affected_pct"] == 20.0
+    assert "4 raw labels collapse to 2" in issue["observed"]
+    assert "20 rows (20.0%)" in issue["observed"]

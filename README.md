@@ -8,8 +8,6 @@ Axiomrow is an AI-assisted data analysis workspace built with Streamlit. Upload 
 
 > **Screenshots:** Browse the [application screenshots](screenshots/) below to explore the main workflows.
 >
-> **Demo video:** [Watch the Axiomrow demo](axiomrow-demo.mp4)
-
 ---
 
 ## What it does
@@ -106,7 +104,7 @@ Axiomrow runs model-generated code on user data, so this was treated as a primar
 
 ### Install
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/pranjali-sonkamble/Axiomrow.git
 cd Axiomrow
 python -m venv .venv
 # Windows: .venv\Scripts\activate    macOS/Linux: source .venv/bin/activate
@@ -132,12 +130,23 @@ streamlit run app.py
 |---|---|---|
 | `GROQ_API_KEY` / `OPENAI_API_KEY` | none | Provider credentials |
 | `LLM_PROVIDER` | `groq` | `groq` or `openai` |
-| `GROQ_MODEL` / `OPENAI_MODEL` | `openai/gpt-oss-20b` / `gpt-3.5-turbo` | Override the model if a provider deprecates it |
+| `GROQ_MODEL` / `OPENAI_MODEL` | `openai/gpt-oss-20b` / `gpt-4o-mini` | Override the model if a provider deprecates it |
 | `AXIOMROW_SEND_SAMPLE_ROWS` | `1` | Set `0` to stop sending raw sample rows to the LLM |
 | `AXIOMROW_GLOBAL_LLM_CALLS_PER_HOUR` | `600` | Deployment-wide LLM call cap |
 | `AXIOMROW_ENABLE_XLSX` | off | Set `1` to allow Excel loading in the loader (the UI accepts CSV only) |
 
 ---
+
+## Run with Docker
+
+A non-root Docker image is included for testing the app in an isolated container. From the repository root:
+
+```bash
+docker build -t axiomrow .
+docker run --rm -p 8501:8501 --env-file .env axiomrow
+```
+
+Create a local `.env` file from `.env.example` first and add your provider API key. Do not commit the `.env` file. Open `http://localhost:8501` after the container starts. This Dockerfile is a deployment starting point; validate resource limits, outbound-network policy, secrets handling, and monitoring before exposing a public instance.
 
 ## Deploying to Streamlit Community Cloud
 
@@ -176,7 +185,7 @@ python -m pytest tests -q
 
 The suite covers the query engine, forecasting, grounding, the data-quality gate, charts, report generation, sandbox escape attempts, upload limits and feedback, rate limiting, and insight accuracy.
 
-Note: `test_worker_environment_is_wiped` requests the `fork` multiprocessing context, which Windows does not provide. It fails on Windows for that reason and passes on Linux.
+Note: `test_worker_environment_is_wiped` requires the `fork` multiprocessing context, which Windows does not provide, so the test is skipped on Windows and runs on Linux.
 
 CI: `.github/workflows/security.yml` runs `pip-audit`, `bandit` and the tests.
 
@@ -206,11 +215,6 @@ Time scales roughly linearly with rows.
 - The theme loads fonts and icons from Google Fonts and jsDelivr. Self-host them if you need zero third-party requests.
 
 ---
-
-## License
-
-MIT — see [LICENSE](LICENSE).
-
 
 ---
 
@@ -262,4 +266,8 @@ Explore suggested questions and generate a complete analysis report.
 
 The demo walks through Axiomrow's interface, dataset quality checks, data exploration, chat-based analysis, visualizations, and report export.
 
-> **Note:** The demo link assumes the video is committed to the repository root as `axiomrow-demo.mp4`. If you host it on YouTube instead, replace this link with the public or unlisted video URL.
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).
