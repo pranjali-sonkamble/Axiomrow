@@ -35,8 +35,20 @@ IDENTIFIER_NAME_HINTS = (
 
 
 def _is_identifier_like_name(name: str) -> bool:
-    s = re.sub(r"[^a-z0-9]+", "", str(name).lower())
-    return any(h.replace(" ", "") in s for h in IDENTIFIER_NAME_HINTS)
+    tokens = re.sub(r"[^a-z0-9]+", "_", str(name).lower()).strip("_").split("_")
+    compact = "".join(tokens)
+    exact_hints = {
+        "id", "code", "sku", "invoice", "customer", "account", "product",
+        "postal", "postcode", "zip", "phone", "telephone", "reference",
+        "refno", "orderno",
+    }
+    return (
+        any(token in exact_hints for token in tokens)
+        or any(h.replace(" ", "") in compact for h in (
+            "stockcode", "invoiceno", "customerid", "accountid",
+            "productid", "postalcode", "ordernumber",
+        ))
+    )
 
 def _issue(
     issue: str,
