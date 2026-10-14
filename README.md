@@ -176,7 +176,9 @@ python -m pytest tests -q
 
 The suite covers the query engine, forecasting, grounding, the data-quality gate, charts, report generation, sandbox escape attempts, upload limits and feedback, rate limiting, and insight accuracy.
 
-Note: `test_worker_environment_is_wiped` requests the `fork` multiprocessing context, which Windows does not provide. It fails on Windows for that reason and passes on Linux.
+**Latest reported test run:** `330 passed, 1 skipped in 21.23s`.
+
+The skipped test is platform-dependent; the test suite reports it as skipped rather than passed. Re-run `python -m pytest tests -q` after future changes and update this result if it changes.
 
 CI: `.github/workflows/security.yml` runs `pip-audit`, `bandit` and the tests.
 
