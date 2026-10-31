@@ -13,5 +13,5 @@ pytz==2026.3.post1
 tzdata==2026.3
 pillow==13.0.0
 fonttools==4.63.0
-defusedxml==0.7.0
+defusedxml==0.7.1
 six==1.17.0
