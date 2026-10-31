@@ -106,7 +106,7 @@ Axiomrow runs model-generated code on user data, so this was treated as a primar
 
 ### Install
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/pranjali-sonkamble/Axiomrow.git
 cd Axiomrow
 python -m venv .venv
 # Windows: .venv\Scripts\activate    macOS/Linux: source .venv/bin/activate
@@ -176,7 +176,7 @@ python -m pytest tests -q
 
 The suite covers the query engine, forecasting, grounding, the data-quality gate, charts, report generation, sandbox escape attempts, upload limits and feedback, rate limiting, and insight accuracy.
 
-**Latest reported test run:** `330 passed, 1 skipped in 21.23s`.
+**Latest documented test run:** `330 passed, 1 skipped in 21.23s` (historical result; not re-run by this documentation update). Confirm the count on the checked-out revision by running the command below before quoting it as current.
 
 The skipped test is platform-dependent; the test suite reports it as skipped rather than passed. Re-run `python -m pytest tests -q` after future changes and update this result if it changes.
 
@@ -186,13 +186,13 @@ CI: `.github/workflows/security.yml` runs `pip-audit`, `bandit` and the tests.
 
 ## Performance
 
-Measured on a Windows laptop with a ~128 MB CSV of ~1.4 million rows and 13 columns:
+Previously measured on a Windows laptop with a ~128 MB CSV of ~1.4 million rows and 13 columns. These observations are hardware- and dataset-dependent; re-measure on the current revision before quoting them as current benchmarks:
 
 | Step | Time |
 |---|---|
-| Upload, profiling, quality check and insights | ~39 s |
-| Full PDF and Markdown report | ~38 s |
-| Small file (under 1 KB) | ~1 s |
+| Upload, profiling, quality check and insights | ~39 s (historical) |
+| Full PDF and Markdown report | ~38 s (historical) |
+| Small file (under 1 KB) | ~1 s (historical) |
 
 Time scales roughly linearly with rows.
 
